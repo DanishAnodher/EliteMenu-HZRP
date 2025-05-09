@@ -1,22 +1,23 @@
 script_name("EliteMenu")
 script_description("Elite Menu")
-script_version("1.0")
-script_authors("Satoru Yamaguchi")
+script_version("1.2.5")
+script_authors("Satoru Yamaguchi\n Mikehae")
 
 -- Dependencies
-require "lib.moonloader"
-local imgui = require "mimgui"
-local encoding = require "encoding"
-local inicfg = require "inicfg"
-local sampev = require "samp.events"
-local ffi = require "ffi"
-local vkeys = require "vkeys"
+local imgui = require("mimgui")
+local encoding = require("encoding")
+local inicfg = require("inicfg")
+local sampev = require("samp.events")
+local ffi = require("ffi")
+local vkeys = require("vkeys")
+local requests = require("requests")
+local effil = require("effil")
 
 -- Encoding Setup
 encoding.default = "CP1251"
-u8 = encoding.UTF8
-local VERSION = "1.0"
-local AUTHOR = "Satoru Yamaguchi"
+local u8 = encoding.UTF8
+local VERSION = "1.2.5"
+local AUTHOR = "Satoru Yamaguchi \n Mikehae"
 
 local Config = {
     dir = getWorkingDirectory() .. "\\config\\EliteMenu\\",
@@ -123,20 +124,6 @@ function Config:save(module)
     return inicfg.save(config.data, config.path)
 end
 
--- Gang Order
-local GangOrder = {
-    "6th St. Kingz",
-    "10th Ave Junkyard",
-    "Yakuza",
-    "Liang Shan",
-    "Only The Family",
-    "Black Hand Triads",
-    "Bastards",
-    "Pirates",
-    "Puente Estrada",
-    "Villain Hooligan Mobsters"
-}
-
 -- Gang Definitions
 local Gangs = {
     ["6th St. Kingz"] = { skins = {0, 195, 293, 271, 269, 270}, color = imgui.ImVec4(0.01, 0.38, 0.10, 1.0), chatColor = "{05631C}" },
@@ -150,6 +137,13 @@ local Gangs = {
     ["Puente Estrada"] = { skins = {175, 268, 114, 115, 116, 174, 44, 53}, color = imgui.ImVec4(0.00, 1.00, 0.98, 1.0), chatColor = "{00FFFB}" },
     ["Villain Hooligan Mobsters"] = { skins = {13, 102, 103, 104, 185, 296}, color = imgui.ImVec4(0.50, 0.00, 0.50, 1.0), chatColor = "{800080}" }
 }
+
+-- Initialize GangOrder Variable & Sort it
+local GangOrder = {}
+for gangName in pairs(Gangs) do
+    table.insert(GangOrder, gangName)
+end
+table.sort(GangOrder)
 
 -- UI State
 local UI = {
@@ -259,7 +253,6 @@ function Helpers:isPlayerInGang(playerId, gangList)
     local result, ped = sampGetCharHandleBySampPlayerId(playerId)
     if not result then return false, nil end
     
-    local playerSkin = getCharModel(ped)
     -- Convert boolean gangList to list of whitelisted gang names
     local whitelistedGangNames = {}
     for i, isWhitelisted in ipairs(gangList) do
@@ -271,7 +264,7 @@ function Helpers:isPlayerInGang(playerId, gangList)
     for _, gangName in ipairs(whitelistedGangNames) do
         if Gangs[gangName] then
             for _, skinId in ipairs(Gangs[gangName].skins) do
-                if playerSkin == skinId then
+                if getCharModel(ped) == skinId then
                     return true, gangName
                 end
             end
@@ -298,63 +291,10 @@ function Helpers:hasOneFreq(text)
 end
 
 function Helpers:getKeyName(keyCode)
-    if UI.keyNames[keyCode] then
+    if UI.keyNames and UI.keyNames[keyCode] then
         return UI.keyNames[keyCode]
     end
-    
-    -- Default key names for common keys
-    local keyNames = {
-        [VK_LBUTTON] = "Left Mouse",
-        [VK_RBUTTON] = "Right Mouse",
-        [VK_MBUTTON] = "Middle Mouse",
-        [VK_BACK] = "Backspace",
-        [VK_TAB] = "Tab",
-        [VK_RETURN] = "Enter",
-        [VK_SHIFT] = "Shift",
-        [VK_CONTROL] = "Ctrl",
-        [VK_MENU] = "Alt",
-        [VK_PAUSE] = "Pause",
-        [VK_CAPITAL] = "Caps Lock",
-        [VK_ESCAPE] = "Escape",
-        [VK_SPACE] = "Space",
-        [VK_PRIOR] = "Page Up",
-        [VK_NEXT] = "Page Down",
-        [VK_END] = "End",
-        [VK_HOME] = "Home",
-        [VK_LEFT] = "Left Arrow",
-        [VK_UP] = "Up Arrow",
-        [VK_RIGHT] = "Right Arrow",
-        [VK_DOWN] = "Down Arrow",
-        [VK_INSERT] = "Insert",
-        [VK_DELETE] = "Delete",
-        [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
-        [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
-        [0x41] = "A", [0x42] = "B", [0x43] = "C", [0x44] = "D", [0x45] = "E",
-        [0x46] = "F", [0x47] = "G", [0x48] = "H", [0x49] = "I", [0x50] = "J",
-        [0x4B] = "K", [0x4C] = "L", [0x4D] = "M", [0x4E] = "N", [0x4F] = "O",
-        [0x50] = "P", [0x51] = "Q", [0x52] = "R", [0x53] = "S", [0x54] = "T",
-        [0x55] = "U", [0x56] = "V", [0x57] = "W", [0x58] = "X", [0x59] = "Y",
-        [0x5A] = "Z",
-        [VK_NUMPAD0] = "Numpad 0", [VK_NUMPAD1] = "Numpad 1", [VK_NUMPAD2] = "Numpad 2",
-        [VK_NUMPAD3] = "Numpad 3", [VK_NUMPAD4] = "Numpad 4", [VK_NUMPAD5] = "Numpad 5",
-        [VK_NUMPAD6] = "Numpad 6", [VK_NUMPAD7] = "Numpad 7", [VK_NUMPAD8] = "Numpad 8",
-        [VK_NUMPAD9] = "Numpad 9",
-        [VK_MULTIPLY] = "Numpad *", [VK_ADD] = "Numpad +", [VK_SUBTRACT] = "Numpad -",
-        [VK_DECIMAL] = "Numpad .", [VK_DIVIDE] = "Numpad /",
-        [VK_F1] = "F1", [VK_F2] = "F2", [VK_F3] = "F3", [VK_F4] = "F4", [VK_F5] = "F5",
-        [VK_F6] = "F6", [VK_F7] = "F7", [VK_F8] = "F8", [VK_F9] = "F9", [VK_F10] = "F10",
-        [VK_F11] = "F11", [VK_F12] = "F12",
-        [VK_NUMLOCK] = "Num Lock", [VK_SCROLL] = "Scroll Lock",
-        [VK_LSHIFT] = "Left Shift", [VK_RSHIFT] = "Right Shift",
-        [VK_LCONTROL] = "Left Ctrl", [VK_RCONTROL] = "Right Ctrl",
-        [VK_LMENU] = "Left Alt", [VK_RMENU] = "Right Alt",
-        [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-", [0xBE] = ".",
-        [0xBF] = "/", [0xC0] = "`", [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]",
-        [0xDE] = "'",
-        [191] = "/"
-    }
-    
-    return keyNames[keyCode] or "Key " .. keyCode
+    return vkeys.id_to_name(keyCode) or ("Key " .. keyCode)
 end
 
 -- AutoSetFreq Module
@@ -490,6 +430,8 @@ end
 function main()
     if not isSampLoaded() then return end
     while not isSampAvailable() do wait(100) end
+
+    fetchAndInstallUpdate()
     
     Config:init()
     UI.currentModule = Config.configs.Settings.data.Settings.lastModule
@@ -1041,4 +983,73 @@ function table.removeValue(tbl, value)
             return
         end
     end
+end
+
+--===================
+--Adition By: MIKEHAE
+--===================
+
+-- Asynchronous HTTP Request
+function asyncHttpRequest(method, url, args, resolve, reject)
+	local request_thread = effil.thread(function(method, url, args)
+		local result, response = pcall(requests.request, method, url, args)
+		if result then
+			response.json, response.xml = nil, nil
+			return true, response
+		else
+			return false, response
+		end
+	end)(method, url, args)
+	if not resolve then resolve = function() end end
+	if not reject then reject = function() end end
+	lua_thread_create(function()
+		local runner = request_thread
+		while true do
+			local status, err = runner:status()
+			if not err then
+				if status == 'completed' then
+					local result, response = runner:get()
+					if result then
+						resolve(response)
+					else
+						reject(response)
+					end
+					return
+				elseif status == 'canceled' then
+					return reject(status)
+				end
+			else
+				return reject(err)
+			end
+			wait(0)
+		end
+	end)
+end
+
+function fetchAndInstallUpdate()
+    asyncHttpRequest('GET', "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/update.json", nil,
+        function(response)
+            if response.text ~= nil then
+                local data = decodeJson(response.text)
+                if data and data.version then
+                    local remote_version = tonumber(data.version:match("(%d+%.%d+%.%d+)"))
+                    if remote_version and remote_version > VERSION then
+                        downloadUrlToFile(
+                            "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/EliteMenu.luac",
+                            thisScript().path,
+                            function(_, status)
+                                if status == 6 then
+                                    thisScript():reload()
+                                end
+                                return true
+                            end
+                        )
+                    end
+                end
+            end
+        end,
+        function(err)
+            print("[UPDATE ERROR]:", err)
+        end
+    )
 end
