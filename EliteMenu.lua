@@ -5,18 +5,12 @@ script_authors("Satoru Yamaguchi\n Mikehae")
 
 -- Dependencies
 local imgui = require("mimgui")
-local encoding = require("encoding")
 local inicfg = require("inicfg")
 local sampev = require("samp.events")
 local ffi = require("ffi")
 local vkeys = require("vkeys")
-local requests = require("requests")
 local effil = require("effil")
 
--- Encoding Setup
-encoding.default = "CP1251"
-local u8 = encoding.UTF8
-local VERSION = "1.2.5"
 local AUTHOR = "Satoru Yamaguchi \n Mikehae"
 
 local Config = {
@@ -124,26 +118,10 @@ function Config:save(module)
     return inicfg.save(config.data, config.path)
 end
 
--- Gang Definitions
-local Gangs = {
-    ["6th St. Kingz"] = { skins = {0, 195, 293, 271, 269, 270}, color = imgui.ImVec4(0.01, 0.38, 0.10, 1.0), chatColor = "{05631C}" },
-    ["10th Ave Junkyard"] = { skins = {261, 156, 176, 41, 21, 297, 69}, color = imgui.ImVec4(0.9843, 0.8706, 0.7020, 1.0), chatColor = "{FBDEB3}" },
-    ["Yakuza"] = { skins = {49, 193, 60, 123, 263, 186, 210, 122}, color = imgui.ImVec4(0.60, 0.00, 0.00, 1.0), chatColor = "{990000}" },
-    ["Liang Shan"] = { skins = {170, 229, 228, 121, 224, 231, 234, 2}, color = imgui.ImVec4(0.46, 0.62, 0.56, 1.0), chatColor = "{749E8F}" },
-    ["Only The Family"] = { skins = {19, 22, 180, 144, 190, 58}, color = imgui.ImVec4(1.00, 0.00, 0.00, 1.0), chatColor = "{FF0000}" },
-    ["Black Hand Triads"] = { skins = {294, 59, 117, 118, 120, 141, 169, 208}, color = imgui.ImVec4(0.36, 0.36, 0.36, 1.0), chatColor = "{5C5C5C}" },
-    ["Bastards"] = { skins = {1, 192, 132, 100, 181, 247, 248}, color = imgui.ImVec4(0.29, 0.09, 0.09, 1.0), chatColor = "{491818}" },
-    ["Pirates"] = { skins = {32, 209, 134, 201, 146, 136}, color = imgui.ImVec4(1.00, 0.26, 0.60, 1.0), chatColor = "{FF4399}" },
-    ["Puente Estrada"] = { skins = {175, 268, 114, 115, 116, 174, 44, 53}, color = imgui.ImVec4(0.00, 1.00, 0.98, 1.0), chatColor = "{00FFFB}" },
-    ["Villain Hooligan Mobsters"] = { skins = {13, 102, 103, 104, 185, 296}, color = imgui.ImVec4(0.50, 0.00, 0.50, 1.0), chatColor = "{800080}" }
-}
 
--- Initialize GangOrder Variable & Sort it
+local Gangs = {}
 local GangOrder = {}
-for gangName in pairs(Gangs) do
-    table.insert(GangOrder, gangName)
-end
-table.sort(GangOrder)
+
 
 -- UI State
 local UI = {
@@ -431,8 +409,9 @@ function main()
     if not isSampLoaded() then return end
     while not isSampAvailable() do wait(100) end
 
-    fetchAndInstallUpdate()
-    
+    fetchAndInstallUpdate() -- Check UPDATE
+    fetchGangsData()        -- Fetch Gangs Skins|Color|
+
     Config:init()
     UI.currentModule = Config.configs.Settings.data.Settings.lastModule
     UI.freqBuffer = imgui.new.char[32](tostring(Config.configs.AutoSetFreq.data.Settings.freq))
@@ -443,7 +422,7 @@ function main()
     UI.acceptArmorThresholdBuffer = imgui.new.int(Config.configs.AutoVester.data.Settings.acceptArmorThreshold)
     UI.menuKeyBuffer = imgui.new.char[32](Helpers:getKeyName(Config.configs.Settings.data.Settings.menuKey))
     
-    sampAddChatMessage(ChatColors.main .. "EliteMenu " .. "{D3D3D3}(" .. VERSION .. ") {FFFFFF}- Made by " .. AUTHOR .. " | " .. ChatColors.main .. "/elitemenu", 0xFFFFFF)
+    sampAddChatMessage(ChatColors.main .. "EliteMenu " .. "{D3D3D3}(" .. thisScript().version .. ") {FFFFFF}- Made by " .. AUTHOR .. " | " .. ChatColors.main .. "/elitemenu", 0xFFFFFF)
     
     sampRegisterChatCommand("elitemenu", function() UI.showMenu[0] = not UI.showMenu[0] end)
     sampRegisterChatCommand("asf", function() AutoSetFreq:toggle() end)
@@ -570,7 +549,7 @@ imgui.OnFrame(function() return UI.showMenu[0] end, function()
     imgui.SetNextWindowPos(imgui.ImVec2(resX / 2, resY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
     imgui.SetNextWindowSize(UI.menuSize, imgui.Cond.FirstUseEver)
     
-    if imgui.Begin("Elite Menu (" .. VERSION .. ")", UI.showMenu, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize) then
+    if imgui.Begin("Elite Menu (" .. thisScript().version .. ")", UI.showMenu, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize) then
         imgui.BeginChild("MainContent", imgui.ImVec2(0, 0), false)
         
         imgui.BeginChild("Sidebar", imgui.ImVec2(140, 0), true)
@@ -614,7 +593,7 @@ imgui.OnFrame(function() return UI.showMenu[0] end, function()
                 imgui.SameLine(headerWidth - 25)
                 local newActive = UIComponents:DrawToggle(Config.configs.AutoVester.data.Settings.active)
                 if newActive ~= Config.configs.AutoVester.data.Settings.active then
-                    Config.configs.AutoVester.data.active = newActive
+                    Config.configs.AutoVester.data.Settings.active = newActive
                     Config:save("AutoVester")
                     local status = newActive and "Activated" or "Deactivated"
                     local color = newActive and ChatColors.success or ChatColors.error
@@ -810,56 +789,48 @@ function renderAutoVester()
     end
     
     imgui.Columns(1)
-    
+
     imgui.Dummy(imgui.ImVec2(0, 5))
     imgui.Separator()
-    
+
     imgui.TextColored(Colors.primary, "Gang Settings")
     imgui.TextColored(Colors.textDim, "Select which gangs to automatically vest")
     imgui.Dummy(imgui.ImVec2(0, 5))
-    
-    -- Display gangs in 2 columns
-    imgui.Columns(2, "GangColumns", false)
 
-    -- Calculate how many gangs to show per column
-    local totalGangs = #GangOrder
-    local gangsPerColumn = math.ceil(totalGangs / 2)
+    imgui.Columns(2, nil, false) -- 2 columns, no border
 
-    -- First column
-    for i = 1, gangsPerColumn do
+    for i = 1, #GangOrder do
         local gangName = GangOrder[i]
         local gangInfo = Gangs[gangName]
-        
-        imgui.TextColored(gangInfo.color, gangName)
+
+        -- Convert hex to ImVec4 safely
+        local hex = tostring(gangInfo.color or "FFFFFF"):gsub("#", "")
+        if #hex ~= 6 then hex = "FFFFFF" end
+        local r = tonumber(hex:sub(1, 2), 16) or 255
+        local g = tonumber(hex:sub(3, 4), 16) or 255
+        local b = tonumber(hex:sub(5, 6), 16) or 255
+        local color = imgui.ImVec4(r / 255, g / 255, b / 255, 1.0)
+
+        -- Render gang name with color
+        imgui.TextColored(color, gangName)
         imgui.SameLine(imgui.GetContentRegionAvail().x - 25)
-        
+
+        -- Toggle logic
         local isWhitelisted = Config.configs.AutoVester.data.WhitelistedGangs[i]
         local newWhitelisted = UIComponents:DrawToggle(isWhitelisted)
         if newWhitelisted ~= isWhitelisted then
             Config.configs.AutoVester.data.WhitelistedGangs[i] = newWhitelisted
             Config:save("AutoVester")
         end
-    end
 
-    imgui.NextColumn()
-
-    -- Second column
-    for i = gangsPerColumn + 1, totalGangs do
-        local gangName = GangOrder[i]
-        local gangInfo = Gangs[gangName]
-        
-        imgui.TextColored(gangInfo.color, gangName)
-        imgui.SameLine(imgui.GetContentRegionAvail().x - 25)
-        
-        local isWhitelisted = Config.configs.AutoVester.data.WhitelistedGangs[i]
-        local newWhitelisted = UIComponents:DrawToggle(isWhitelisted)
-        if newWhitelisted ~= isWhitelisted then
-            Config.configs.AutoVester.data.WhitelistedGangs[i] = newWhitelisted
-            Config:save("AutoVester")
+        -- Go to the next column every N gangs
+        if i == math.ceil(#GangOrder / 2) then
+            imgui.NextColumn()
         end
     end
 
-    imgui.Columns(1)
+    imgui.Columns(1) -- reset to single column
+
 
     imgui.Dummy(imgui.ImVec2(0, 5))
     imgui.Separator()
@@ -949,7 +920,7 @@ function renderSettings()
     
     imgui.TextColored(Colors.text, "Version: ") 
     imgui.SameLine()
-    imgui.TextColored(Colors.textDim, VERSION)
+    imgui.TextColored(Colors.textDim, thisScript().version)
     
     imgui.TextColored(Colors.text, "Author: ") 
     imgui.SameLine()
@@ -989,9 +960,10 @@ end
 --Adition By: MIKEHAE
 --===================
 
--- Asynchronous HTTP Request
+-- Asynchronous Http Requests
 function asyncHttpRequest(method, url, args, resolve, reject)
 	local request_thread = effil.thread(function(method, url, args)
+		local requests = require('requests')
 		local result, response = pcall(requests.request, method, url, args)
 		if result then
 			response.json, response.xml = nil, nil
@@ -1002,7 +974,7 @@ function asyncHttpRequest(method, url, args, resolve, reject)
 	end)(method, url, args)
 	if not resolve then resolve = function() end end
 	if not reject then reject = function() end end
-	lua_thread_create(function()
+	lua_thread.create(function()
 		local runner = request_thread
 		while true do
 			local status, err = runner:status()
@@ -1031,9 +1003,10 @@ function fetchAndInstallUpdate()
         function(response)
             if response.text ~= nil then
                 local data = decodeJson(response.text)
+
                 if data and data.version then
-                    local remote_version = tonumber(data.version:match("(%d+%.%d+%.%d+)"))
-                    if remote_version and remote_version > VERSION then
+                    local remote_version = data.version:match("(%d+%.%d+%.%d+)")
+                    if remote_version and isVersionNewer(remote_version, thisScript().version) then
                         downloadUrlToFile(
                             "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/EliteMenu.luac",
                             thisScript().path,
@@ -1049,7 +1022,59 @@ function fetchAndInstallUpdate()
             end
         end,
         function(err)
-            print("[UPDATE ERROR]:", err)
+            print("[ELITEMENU ERROR]:", err)
         end
     )
+end
+
+function fetchGangsData()
+    asyncHttpRequest("GET", "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/GANGS.json", nil,
+        function(response)
+            local data = decodeJson(response.text)
+
+            for gangNumber, gang in pairs(data) do
+                if gang.name and gang.skins and gang.color then
+                    Gangs[gang.name] = {
+                        skins = gang.skins,
+                        color = gang.color
+                    }
+                    GangOrder[tonumber(gangNumber)] = gang.name
+                else
+                    print("[ELITEMENU WARNING]: Invalid gang data at key:", gangNumber)
+                end
+            end
+
+            local cleanedOrder = {}
+            for i = 1, #GangOrder do
+                if GangOrder[i] then
+                    table.insert(cleanedOrder, GangOrder[i])
+                end
+            end
+            GangOrder = cleanedOrder
+        end,
+
+        function(err)
+            print("[ELITEMENU ERROR]: Failed to fetch gang data:", tostring(err))
+        end
+    )
+end
+
+-- Compare Version Function
+function isVersionNewer(remote, localVersion)
+    local function splitVersion(ver)
+        local parts = {}
+        for part in ver:gmatch("%d+") do
+            table.insert(parts, tonumber(part))
+        end
+        return parts
+    end
+
+    local r, l = splitVersion(remote), splitVersion(localVersion)
+    for i = 1, math.max(#r, #l) do
+        local rv = r[i] or 0
+        local lv = l[i] or 0
+        if rv > lv then return true end
+        if rv < lv then return false end
+    end
+    return false
 end
