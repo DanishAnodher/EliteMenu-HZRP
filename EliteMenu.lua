@@ -1,6 +1,6 @@
 script_name("EliteMenu")
 script_description("Elite Menu")
-script_version("1.3.0")
+script_version("1.3.2")
 script_authors("Satoru Yamaguchi\n Mikehae")
 
 -- Dependencies
@@ -1216,9 +1216,9 @@ function runAutoFind(params)
 
     sampAddChatMessage(string.format(
         "[EliteMenu]: {FFFFFF}Finding: {%06x}%s {FFFFFF}| ID: {%06x}%d {FFFFFF}| Level: {%06x}%d",
-        0x00FF00, displayName,
-        0x00FF00, autofind.playerId,
-        0x00FF00, playerLevel
+        0x00CCFF, displayName,
+        0x00CCFF, autofind.playerId,
+        0x00CCFF, playerLevel
     ), 0xFF0000)
 
     if autofind.enable then
@@ -1530,9 +1530,9 @@ local messageHandlers = {
                 end
                 sampAddChatMessage(string.format(
                     "[EliteMenu]: {FFFFFF}Finding: {%06x}%s {FFFFFF}| Status: {%06x}In Turf {FFFFFF}| Refind: {%06x}5 Seconds",
-                    0x00FF00, autofind.playerName:gsub("_", " "),
+                    0x00CCFF, autofind.playerName:gsub("_", " "),
                     0xFF0000,
-                    0x00FF00
+                    0x00CCFF
                 ), 0xFF0000)
                 setTimer(5, timers.Find)
                 return false
@@ -1565,9 +1565,9 @@ local messageHandlers = {
                 autofind.enable = true
                 setTimer(0.1, timers.Find)
                 sampAddChatMessage(string.format(
-                    "[EliteMenu]: {FFFFFF}Autofind: {00FF00}Enabled {FFFFFF}| Refinding: {%06x}%s {FFFFFF}| ID: {%06x}%d",
-                    0x00FF00, autofind.playerName:gsub("_", " "),
-                    0x00FF00, autofind.playerId
+                    "[EliteMenu]: {FFFFFF}Autofind: {00CCFF}Enabled {FFFFFF}| Refinding: {%06x}%s {FFFFFF}| ID: {%06x}%d",
+                    0x00CCFF, autofind.playerName:gsub("_", " "),
+                    0x00CCFF, autofind.playerId
                 ), 0xFF0000)
             end
         end
@@ -1634,13 +1634,22 @@ function onPlayerJoin(playerId)
     if autofind.disconnected then
         if sampGetPlayerNickname(playerId) == autofind.playerName then
             autofind.disconnected = false
+            autofind.playerId = playerId
             sampAddChatMessage(
                 string.format(
-                    "[EliteMenu]: {ffffff}Relogged: {00FF00}%s {ffffff}| ID: {00FF00}%d",
+                    "[EliteMenu]: {ffffff}Relogged: {00CCFF}%s {ffffff}| ID: {00CCFF}%d",
                     sampGetPlayerNickname(playerId), playerId
                 ), 
                 0xFF0000
             )
+        end
+    end
+end
+
+function sampev.onPlayerQuit(playerId, reason)
+    if autofind.disconnected == false then
+        if playerId == autofind.playerId then
+            autofind.disconnected = true
         end
     end
 end
@@ -1652,14 +1661,6 @@ function sampev.onShowTextDraw(id, data)
 
     if data.text:match("~g~Objects loaded!") then
         isLoadingObjects = false
-    end
-end
-
-function sampev.onPlayerQuit(playerId, reason)
-    if autofind.disconnected == false then
-        if playerId == autofind.playerId then
-            autofind.disconnected = true
-        end
     end
 end
 
