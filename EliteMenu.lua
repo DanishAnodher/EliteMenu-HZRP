@@ -1,6 +1,6 @@
 script_name("EliteMenu")
 script_description("Elite Menu")
-script_version("1.2.5")
+script_version("1.3.0")
 script_authors("Satoru Yamaguchi\n Mikehae")
 
 -- Dependencies
@@ -10,8 +10,9 @@ local sampev = require("samp.events")
 local ffi = require("ffi")
 local vkeys = require("vkeys")
 local effil = require("effil")
+local wm = require("windows.message")
 
-local AUTHOR = "Satoru Yamaguchi \n Mikehae"
+local AUTHOR = "Satoru / Mikehae"
 
 local Config = {
     dir = getWorkingDirectory() .. "\\config\\EliteMenu\\",
@@ -122,7 +123,6 @@ end
 local Gangs = {}
 local GangOrder = {}
 
-
 -- UI State
 local UI = {
     showMenu = imgui.new.bool(false),
@@ -137,6 +137,7 @@ local UI = {
     vestArmorThresholdBuffer = nil,
     acceptArmorThresholdBuffer = nil,
     menuKeyBuffer = nil,
+    lawyerLevelBuffer = nil,
     waitingForKey = false,
     keyNames = {}
 }
@@ -163,14 +164,14 @@ local Colors = {
 }
 
 local ChatColors = {
-    main = "{FF0000}",
-    autoSetFreq = "{F26666}",
-    autoVester = "{6699FF}",
-    highCommand = "{F2B233}",
-    misc = "{9966F2}",
-    success = "{33CC33}",
-    warning = "{FFCC00}",
-    error = "{FF3333}"
+    main = "{FF0000}",        -- Red
+    autoSetFreq = "{F26666}", -- Light red
+    autoVester = "{6699FF}",  -- Light blue
+    highCommand = "{F2B233}", -- Gold
+    misc = "{9966F2}",        -- Purple
+    success = "{33CC33}",     -- Green
+    warning = "{FFCC00}",     -- Yellow
+    error = "{FF3333}"        -- Dark red
 }
 
 -- Module Management
@@ -261,6 +262,46 @@ function Helpers:getPlayerIdByName(playerName)
         end
     end
     return -1 -- Return -1 if player not found
+end
+
+function Helpers:getPlayer(target)
+    print(target)
+    -- Validate input
+    if not target or (type(target) ~= "string" and type(target) ~= "number") or (type(target) == "string" and target:match("^%s*$")) then
+        return false, nil
+    end
+
+    -- Try to convert target to ID if it's a number or numeric string
+    local targetId = tonumber(target)
+    if targetId and sampIsPlayerConnected(targetId) then
+        return true, targetId
+    end
+
+    -- If target is a string, search for player by partial name match
+    if type(target) == "string" then
+        local matchedId = nil
+        for i = 0, sampGetMaxPlayerId(false) do
+            if sampIsPlayerConnected(i) then
+                local name = sampGetPlayerNickname(i)
+                if name and name:lower():find(target:lower(), 1, true) then
+                    -- Return the first match found
+                    if matchedId == nil then
+                        matchedId = i
+                    else
+                        -- Optional: Warn about multiple matches (commented out)
+                        -- sampAddChatMessage("Warning: Multiple players match '" .. target .. "'. Using first match.", 0xFFFFFF)
+                        break
+                    end
+                end
+            end
+        end
+        if matchedId then
+            return true, matchedId
+        end
+    end
+
+    -- No match found
+    return false, nil
 end
 
 function Helpers:hasOneFreq(text)
@@ -374,7 +415,7 @@ function AutoVester:run()
                             local playerArmor = sampGetPlayerArmor(i)
                             
                             -- Check if player is in range and their armor is below threshold
-                            if distance < 5.0 and 
+                            if distance < 7.0 and 
                                playerArmor <= Config.configs.AutoVester.data.Settings.vestArmorThreshold then
                                 -- Check if player is in whitelisted gang
                                 local isWhitelisted, gangName = Helpers:isPlayerInGang(i, Config.configs.AutoVester.data.WhitelistedGangs)
@@ -404,13 +445,38 @@ function Settings:setMenuKey(keyCode)
     end
 end
 
+local timers = {
+	Find = {timer = 20.0, last = 0, sentTime = 0, timeOut = 5.0},
+	Muted = {timer = 13.0, last = 0},
+    AFK = {timer = 90.0, last = 0, sentTime = 0, timeOut = 5.0}
+}
+
+local autofind = {
+    enable = false,
+    getLevel = false,
+    received = false,
+    disconnected = false,
+    playerName = "",
+    playerId = -1,
+    detectLevel = 0,
+    counter = 0,
+    timerList = {
+        [1] = 124,
+        [2] = 86,
+        [3] = 68,
+        [4] = 40,
+        [5] = 27,
+    }
+}
+
+local isLoadingObjects = false
+local isPlayerPaused = false
+local isPlayerAFK = false
+
 -- Main Function
 function main()
     if not isSampLoaded() then return end
     while not isSampAvailable() do wait(100) end
-
-    fetchAndInstallUpdate() -- Check UPDATE
-    fetchGangsData()        -- Fetch Gangs Skins|Color|
 
     Config:init()
     UI.currentModule = Config.configs.Settings.data.Settings.lastModule
@@ -419,17 +485,11 @@ function main()
     UI.vestCommandBuffer = imgui.new.char[32](Config.configs.AutoVester.data.Settings.vestCommand)
     UI.acceptCommandBuffer = imgui.new.char[32](Config.configs.AutoVester.data.Settings.acceptCommand)
     UI.vestArmorThresholdBuffer = imgui.new.int(Config.configs.AutoVester.data.Settings.vestArmorThreshold)
-    UI.acceptArmorThresholdBuffer = imgui.new.int(Config.configs.AutoVester.data.Settings.acceptArmorThreshold)
+    UI.acceptArmorThresholdBuffer = imgui.new.int(Config.configs.AutoVester.data.Settings
+        .acceptArmorThreshold)
     UI.menuKeyBuffer = imgui.new.char[32](Helpers:getKeyName(Config.configs.Settings.data.Settings.menuKey))
-    
-    sampAddChatMessage(ChatColors.main .. "EliteMenu " .. "{D3D3D3}(" .. thisScript().version .. ") {FFFFFF}- Made by " .. AUTHOR .. " | " .. ChatColors.main .. "/elitemenu", 0xFFFFFF)
-    
-    sampRegisterChatCommand("elitemenu", function() UI.showMenu[0] = not UI.showMenu[0] end)
-    sampRegisterChatCommand("asf", function() AutoSetFreq:toggle() end)
-    sampRegisterChatCommand("asfset", function(arg) AutoSetFreq:setPriority(arg) end)
-    sampRegisterChatCommand(Config.configs.AutoVester.data.Settings.vestCommand, function() AutoVester:toggle() end)
-    sampRegisterChatCommand(Config.configs.AutoVester.data.Settings.acceptCommand, function() AutoVester:toggleAccept() end)
-    
+
+
     Modules:register("Home", renderHome)
     Modules:register("Auto Set Freq", renderAutoSetFreq)
     Modules:register("Auto Vester", renderAutoVester)
@@ -437,28 +497,15 @@ function main()
     Modules:register("Miscellaneous", renderMisc)
     Modules:register("Settings", renderSettings)
     
-    sampev.onServerMessage = function(color, text)
-        AutoSetFreq:processServerMessage(color, text)
-        AutoVester:processServerMessage(color, text)
-    end
-
-    addEventHandler('onWindowMessage', function(msg, wparam, lparam)
-        if UI.showMenu[0] and msg == 256 and wparam == 27 then  -- Escape key pressed
-            consumeWindowMessage(true, false)  -- Block default Escape behavior
-            UI.showMenu[0] = false
-        end
-    end)
-    
     AutoVester:run()
     
     while true do
         wait(0)
-
         -- Check for menu key press
         if isKeyJustPressed(Config.configs.Settings.data.Settings.menuKey) and not sampIsChatInputActive() and not sampIsDialogActive() then
             UI.showMenu[0] = not UI.showMenu[0]
         end
-        
+
         -- Check for key binding
         if UI.waitingForKey then
             for i = 1, 255 do
@@ -470,11 +517,34 @@ function main()
                 end
             end
         end
-        
+
         if UI.showMenu[0] and Config.configs.Settings.data.Settings.lastModule ~= UI.currentModule then
             Config.configs.Settings.data.Settings.lastModule = UI.currentModule
             Config:save("Settings")
         end
+        
+
+        functionLoop(function(started, failed)
+            fetchAndInstallUpdate()     -- Check UPDATE
+            fetchGangsData()            -- Fetch Gangs Skins|Color|
+
+
+            sampAddChatMessage(
+                ChatColors.main ..
+                "EliteMenu " ..
+                "{D3D3D3}(" ..
+                thisScript().version .. ") {FFFFFF}- Made by " .. AUTHOR .. " | " .. ChatColors.main .. "/elitemenu",
+                0xFFFFFF)
+
+            sampRegisterChatCommand("elitemenu", function() UI.showMenu[0] = not UI.showMenu[0] end)
+            sampRegisterChatCommand("asf", function() AutoSetFreq:toggle() end)
+            sampRegisterChatCommand("asfset", function(arg) AutoSetFreq:setPriority(arg) end)
+            sampRegisterChatCommand(Config.configs.AutoVester.data.Settings.vestCommand,
+                function() AutoVester:toggle() end)
+            sampRegisterChatCommand(Config.configs.AutoVester.data.Settings.acceptCommand,
+                function() AutoVester:toggleAccept() end)
+                sampRegisterChatCommand("af", runAutoFind)
+        end)
     end
 end
 
@@ -1008,7 +1078,7 @@ function fetchAndInstallUpdate()
                     local remote_version = data.version:match("(%d+%.%d+%.%d+)")
                     if remote_version and isVersionNewer(remote_version, thisScript().version) then
                         downloadUrlToFile(
-                            "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/EliteMenu.luac",
+                            "https://raw.githubusercontent.com/DanishAnodher/EliteMenu-HZRP/main/EliteMenu.lua",
                             thisScript().path,
                             function(_, status)
                                 if status == 6 then
@@ -1077,4 +1147,548 @@ function isVersionNewer(remote, localVersion)
         if rv < lv then return false end
     end
     return false
+end
+
+function getPlayer(target)
+if not target then return false end
+
+    local targetId = tonumber(target)
+    if targetId and sampIsPlayerConnected(targetId) then
+        return true, targetId, sampGetPlayerNickname(targetId)
+    end
+
+    -- Escape special characters in the target string
+    local escapedTarget = target:gsub("([^%w])", "%%%1")
+
+    for i = 0, sampGetMaxPlayerId(false) do
+        if sampIsPlayerConnected(i) then
+            local name = sampGetPlayerNickname(i)
+            if name:lower():find("^" .. escapedTarget:lower()) then
+                return true, i, name
+            end
+        end
+    end
+
+    return false
+end
+
+function runAutoFind(params)
+    if checkMuted() then
+        sampAddChatMessage("[EliteMenu]: {FFFFFF}You are currently muted - please wait.", 0xFF0000)
+        return
+    end
+
+    if #params < 1 then
+        if autofind.enable then
+            sampAddChatMessage("[EliteMenu]: {FFFFFF}Autofind has been {FF0000}disabled.", 0xFF0000)
+            autofind.enable = false
+            autofind.playerName = ""
+            autofind.playerId = -1
+        else
+            sampAddChatMessage("[EliteMenu]: {FFFFFF}USAGE: /af [playerid/partofname]", 0xFF0000)
+        end
+        return
+    end
+
+    local result, playerid, name = getPlayer(params)
+    if not result then
+        sampAddChatMessage("[EliteMenu]: {FFFFFF}Invalid player specified.", 0xFF0000)
+        return
+    end
+
+    if playerid == autofind.playerId then
+        sampAddChatMessage("[EliteMenu]: {FFFFFF}You are already finding this person.", 0xFF0000)
+        return
+    end
+
+    autofind.playerId = playerid
+    autofind.playerName = name
+    local displayName = autofind.playerName and autofind.playerName:gsub("_", " ") or "Unknown"
+    local playerLevel = sampGetPlayerScore(autofind.playerId)
+
+    if playerLevel == 0 then
+        lua_thread.create(function()
+            repeat
+                wait(0)
+            until playerLevel ~= 0
+        end)
+    end
+
+    sampAddChatMessage(string.format(
+        "[EliteMenu]: {FFFFFF}Finding: {%06x}%s {FFFFFF}| ID: {%06x}%d {FFFFFF}| Level: {%06x}%d",
+        0x00FF00, displayName,
+        0x00FF00, autofind.playerId,
+        0x00FF00, playerLevel
+    ), 0xFF0000)
+
+    if autofind.enable then
+        return
+    end
+
+    autofind.enable = true
+end
+
+function autoFindThread()
+    if not autofind.enable or checkMuted() or isPlayerAFK or isLoadingObjects then
+        goto skipAutoFind
+    end
+
+    -- Check if the player is frozen
+    if not isPlayerControlOn(PLAYER_HANDLE) then
+        goto skipAutoFind
+    end
+
+    local currentTime = localClock()
+    if autofind.received then
+        if currentTime - timers.Find.sentTime > timers.Find.timeOut then
+            autofind.received = false
+        end
+    end
+
+    if autofind.detectLevel == 0 then
+        autofind.getLevel = true
+        sampSendChat("/skills")
+        repeat wait(0) until autofind.detectLevel ~= 0
+    end
+
+    if not sampIsPlayerConnected(autofind.playerId)
+        or (sampIsPlayerConnected(autofind.playerId) and sampGetPlayerNickname(autofind.playerId) ~= autofind.playerName) then
+        autofind.disconnected = true
+        printStringNow("Pending ~r~" .. autofind.playerName .. "~w~ to log back in.", 800)
+        wait(1000)
+    else
+        if not autofind.received then
+            timers.Find.timer = autofind.timerList[autofind.detectLevel] - 7
+            if currentTime - timers.Find.last >= timers.Find.timer then
+                if sampGetGamestate() ~= 3 then
+                    goto skipAutoFindTimer
+                end
+
+                sampSendChat(string.format("/find %d", autofind.playerId))
+                timers.Find.sentTime = currentTime
+                autofind.received = true
+
+                ::skipAutoFindTimer::
+            end
+        end
+    end
+
+    ::skipAutoFind::
+end
+
+local afkKeys = {
+    0x0,
+    0x1,
+    0xF,
+    0x10,
+    0x11,
+    0x12,
+    0x13,
+    0x15
+}
+
+local initialAFKStart = true
+
+function createAFKThread()
+    local currentTime = localClock()
+
+    -- Check if the initial AFK start condition is true
+    if initialAFKStart then
+        setTimer(45.0, timers.AFK)  -- Reset the timer for the next AFK check
+        initialAFKStart = false
+        isPlayerAFK = false
+        goto skipAFKCheck
+    end
+
+    -- Check if the AFK timer has expired (player is considered AFK)
+    if currentTime - timers.AFK.last >= timers.AFK.timer then
+        timers.AFK.last = currentTime
+        isPlayerAFK = true
+        goto skipAFKCheck
+    end
+
+    -- Check if the AFK timer reset timeout has passed.
+    if currentTime - timers.AFK.sentTime <= timers.AFK.timeOut then
+        goto skipAFKCheck
+    end
+
+    -- Check if the player is in a moving vehicle and only reset if enough time has passed
+    if isCharInAnyCar(PLAYER_PED) then
+        local vehid = storeCarCharIsInNoSave(PLAYER_PED)
+        if getCarSpeed(vehid) > 1.0 then
+            -- Only reset if the timeout has passed since the last reset
+            if currentTime - timers.AFK.sentTime >= timers.AFK.timeOut then
+                isPlayerAFK = false
+                timers.AFK.last = currentTime
+                timers.AFK.sentTime = currentTime
+                goto skipAFKCheck
+            end
+        end
+    end
+
+    -- Check if any key is pressed to reset AFK status (only if allowed by the timeout)
+    for _, key in ipairs(afkKeys) do
+        if isButtonPressed(PLAYER_HANDLE, key) then
+            if currentTime - timers.AFK.sentTime >= timers.AFK.timeOut then
+                isPlayerAFK = false
+                timers.AFK.last = currentTime
+                timers.AFK.sentTime = currentTime
+                goto skipAFKCheck
+            end
+        end
+    end
+
+    ::skipAFKCheck::
+end
+
+local playerJoinTracker = {
+    known = {},
+    initialized = false
+}
+
+function pollPlayerJoins()
+    for id = 0, sampGetMaxPlayerId(false) do
+        local connected = sampIsPlayerConnected(id)
+        if connected and not playerJoinTracker.known[id] then
+            playerJoinTracker.known[id] = true
+            if playerJoinTracker.initialized then
+                onPlayerJoin(id)
+            end
+        elseif not connected and playerJoinTracker.known[id] then
+            playerJoinTracker.known[id] = nil
+        end
+    end
+    playerJoinTracker.initialized = true
+end
+
+-- Check if the muted timer has been triggered
+function checkMuted()
+	if localClock() - timers.Muted.last < timers.Muted.timer then
+		return true
+	end
+	return false
+end
+
+function setTimer(additionalTime, timer)
+	timer.last = localClock() - (timer.timer - 0.2) + (additionalTime or 0)
+end
+
+local funcsToRun = {
+    {
+        name = "AUTOFIND",
+        func = autoFindThread,
+        interval = 0.1,
+        lastRun = localClock(),
+        enabled = true,
+    },
+    {
+        name = "AFKCheck",
+        func = createAFKThread,
+        interval = 0.5,
+        lastRun = localClock(),
+        enabled = true,
+    },
+    {
+        name = "PlayerJoinCheck",
+        func = pollPlayerJoins,
+        interval = 0.5,
+        lastRun = localClock(),
+        enabled = true,
+    }
+}
+
+functionLoop = (function()
+    local initialized   = false
+    local errCounts    = {}
+    local MAX_ERRS     = 5
+    local scheduleQueue = {}
+
+    -- insert entry into scheduleQueue sorted by next run time
+    local function insertScheduled(entry)
+        local runAt = entry.lastRun + entry.interval
+        local item  = { runAt = runAt, entry = entry }
+        local i = 1
+        while i <= #scheduleQueue and scheduleQueue[i].runAt <= runAt do
+            i = i + 1
+        end
+        table.insert(scheduleQueue, i, item)
+    end
+
+    return function(onInit)
+        if isPlayerPaused then
+            return
+        end
+
+        local now = localClock()
+
+        -- one‑time init pass
+        if not initialized then
+            initialized = true
+
+            -- both tables must be initialized
+            local started, failed = {}, {}
+
+            for _, entry in ipairs(funcsToRun) do
+                if entry.enabled then
+                    local ok, err = pcall(entry.func)
+                    if ok then
+                        table.insert(started, entry.name)
+                        errCounts[entry.name] = 0
+                    else
+                        errCounts[entry.name] = (errCounts[entry.name] or 0) + 1
+                        table.insert(failed, entry.name)
+                        print(
+                          ("[functionLoop] init error in %q: %s (attempt %d/%d)")
+                          :format(entry.name, err, errCounts[entry.name], MAX_ERRS)
+                        )
+                        if errCounts[entry.name] >= MAX_ERRS then
+                            entry.enabled = false
+                            print(
+                              ("[functionLoop] %q disabled after %d init failures")
+                              :format(entry.name, MAX_ERRS)
+                            )
+                        end
+                    end
+
+                    entry.lastRun = now
+                    insertScheduled(entry)
+                end
+            end
+
+            local okInit, initErr = pcall(onInit, started, failed)
+            if not okInit then
+                print(("[functionLoop] onInit crashed: %s"):format(initErr))
+            end
+            return
+        end
+
+        -- only process entries whose time has come
+        while #scheduleQueue > 0 and scheduleQueue[1].runAt <= now do
+            local item  = table.remove(scheduleQueue, 1)
+            local entry = item.entry
+
+            if entry.enabled then
+                entry.lastRun = now
+
+                local ok, err = pcall(entry.func)
+                if ok then
+                    errCounts[entry.name] = 0
+                else
+                    errCounts[entry.name] = (errCounts[entry.name] or 0) + 1
+                    print(
+                      ("[functionLoop] error in %q: %s (attempt %d/%d)")
+                      :format(entry.name, err, errCounts[entry.name], MAX_ERRS)
+                    )
+                    if errCounts[entry.name] >= MAX_ERRS then
+                        entry.enabled = false
+                        print(
+                          ("[functionLoop] %q disabled after %d failures")
+                          :format(entry.name, MAX_ERRS)
+                        )
+                    end
+                end
+
+                if entry.enabled then
+                    insertScheduled(entry)
+                end
+            end
+        end
+    end
+end)()
+
+local messageHandlers = {
+    { -- Muted Notification
+        pattern = "^You have been muted automatically for spamming%. Please wait 10 seconds and try again%.$",
+        color = -65366,
+        action = function()
+            timers.Muted.last = localClock()
+        end
+    },
+    {     -- Already Searched for Someone
+        pattern = "^You have already searched for someone %- wait a little%.$",
+        color = -1347440726,
+        action = function()
+            if autofind.enable then
+                autofind.received = false
+                if autofind.counter > 0 then
+                    autofind.counter = 0
+                end
+                setTimer(5, timers.Find)
+                return false
+            end
+        end
+    },
+    {
+        -- Can't Find Person Hidden in Turf
+        pattern = "^You can't find that person as they're hidden in one of their turfs%.$",
+        color = -1347440726,
+        action = function()
+            if autofind.enable and autofind.playerName ~= "" and autofind.playerId ~= -1 then
+                autofind.received = false
+                if autofind.counter > 0 then
+                    autofind.counter = 0
+                end
+                sampAddChatMessage(string.format(
+                    "[EliteMenu]: {FFFFFF}Finding: {%06x}%s {FFFFFF}| Status: {%06x}In Turf {FFFFFF}| Refind: {%06x}5 Seconds",
+                    0x00FF00, autofind.playerName:gsub("_", " "),
+                    0xFF0000,
+                    0x00FF00
+                ), 0xFF0000)
+                setTimer(5, timers.Find)
+                return false
+            end
+        end
+    },
+        {   -- Not a Detective
+        pattern = "^You are not a detective%.$",
+        color = -1347440726,
+        action = function()
+            if autofind.enable then
+                autofind.received = false
+                if autofind.counter > 0 then
+                    autofind.counter = 0
+                end
+                autofind.enable = false
+                sampAddChatMessage("[EliteMenu]: {FFFFFF}Autofind has been {FF0000}disabled.", 0xFF0000)
+            end
+        end
+    },
+        {   -- Now a Detective
+        pattern = "^%* You are now a Detective, type %/help to see your new commands%.$",
+        color = 869072810,
+        action = function()
+            if autofind.playerName ~= "" and autofind.playerId ~= -1 then
+                autofind.received = false
+                if autofind.counter > 0 then
+                    autofind.counter = 0
+                end
+                autofind.enable = true
+                setTimer(0.1, timers.Find)
+                sampAddChatMessage(string.format(
+                    "[EliteMenu]: {FFFFFF}Autofind: {00FF00}Enabled {FFFFFF}| Refinding: {%06x}%s {FFFFFF}| ID: {%06x}%d",
+                    0x00FF00, autofind.playerName:gsub("_", " "),
+                    0x00FF00, autofind.playerId
+                ), 0xFF0000)
+            end
+        end
+    },
+        {   -- Unable to Find Person
+        pattern = "^You are unable to find this person%.$",
+        color = -1347440726,
+        action = function()
+            if autofind.enable then
+                autofind.received = false
+                autofind.counter = autofind.counter + 1
+                if autofind.counter >= 5 then
+                    autofind.enable = false
+                    autofind.playerId = -1
+                    autofind.playerName = ""
+                    autofind.counter = 0
+                    sampAddChatMessage("[EliteMenu]: You are unable to find this person.", 0xFF0000)
+                    return false
+                end
+                setTimer(5, timers.Find)
+            end
+        end
+    },
+    {   -- Cross Devil has been last seen at <optional location>.
+        pattern = "^.+ has been last seen at%s?.+%.$",
+        color = -1077886209,
+        action = function()
+
+            if autofind.enable then
+                timers.Find.last = localClock()
+                autofind.received = false
+            end
+        end
+    },
+    { -- SMS: I need the where-abouts of Player Name, Sender: Player Name (Phone Number)
+        pattern = "^SMS: I need the where%-abouts of [^,]+, Sender: [^%(]+%(%d+%)$",
+        color = -65366,
+        action = function()
+            if autofind.enable then
+                timers.Find.last = localClock()
+                autofind.received = false
+            end
+        end
+    },
+}
+
+function onWindowMessage(msg, wparam, lparam)
+    if msg == wm.WM_SETFOCUS then
+        isPlayerPaused = false
+        isPlayerAFK = true
+    elseif msg == wm.WM_KILLFOCUS then
+        isPlayerPaused = true
+    end
+
+    if UI.showMenu[0] and msg == 256 and wparam == 27 then -- Escape key pressed
+        consumeWindowMessage(true, false)                  -- Block default Escape behavior
+        UI.showMenu[0] = false
+    end
+end
+
+-- Created a Custom onPlayerJoin function rather than using sampev.OnPlayerJoin
+-- Reason: sampev.OnPlayerJoin returns all connected players on the sever upon initialization
+function onPlayerJoin(playerId)
+    if autofind.disconnected then
+        if sampGetPlayerNickname(playerId) == autofind.playerName then
+            autofind.disconnected = false
+            sampAddChatMessage(
+                string.format(
+                    "[EliteMenu]: {ffffff}Relogged: {00FF00}%s {ffffff}| ID: {00FF00}%d",
+                    sampGetPlayerNickname(playerId), playerId
+                ), 
+                0xFF0000
+            )
+        end
+    end
+end
+
+function sampev.onShowTextDraw(id, data)
+    if data.text:match("~r~Objects loading...") then
+        isLoadingObjects = true
+    end
+
+    if data.text:match("~g~Objects loaded!") then
+        isLoadingObjects = false
+    end
+end
+
+function sampev.onPlayerQuit(playerId, reason)
+    if autofind.disconnected == false then
+        if playerId == autofind.playerId then
+            autofind.disconnected = true
+        end
+    end
+end
+
+function sampev.onShowDialog(id, style, title, button1, button2, text)
+    if autofind.getLevel then
+		if id == 4 and style == 2 and title:find("Skills") then
+			autofind.getLevel = false
+			autofind.detectLevel = tonumber(text:match("{FFA500}Detective Level:%s*{FFFFFF}(.-){FFA500}"))
+		end
+		return false
+	end
+end
+
+function sampev.onServerMessage(color, text)
+    if isPlayerPaused then return end
+
+    AutoSetFreq:processServerMessage(color, text)
+    AutoVester:processServerMessage(color, text)
+
+    for _, handler in ipairs(messageHandlers) do
+		if handler.color == nil or color == handler.color then
+			local captures = { text:match(handler.pattern) }
+			if #captures > 0 then
+				local result = handler.action(table.unpack(captures))
+				if result ~= nil then
+					return result
+				end
+				break
+			end
+		end
+	end
 end
