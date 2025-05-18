@@ -5,9 +5,9 @@
     "color": "05631C"
   },
   "2": {
-    "name": "10th Ave Junkyard",
-    "skins": [261, 156, 176, 41, 21, 297, 69],
-    "color": "FBDEB3"
+    "name": "Grease Pit Autoworks",
+    "skins": [29, 202, 42, 233, 119, 8],
+    "color": "FD5A13"
   },
   "3": {
     "name": "Yakuza",
@@ -45,8 +45,8 @@
     "color": "00FFFB"
   },
   "10": {
-    "name": "Villain Hooligan Mobsters",
-    "skins": [13, 102, 103, 104, 185, 296],
-    "color": "800080"
+    "name": "Hoodlum Outcast",
+    "skins": [137, 134, 129, 230, 133, 212, 54],
+    "color": "F5DEB3"
   }
 }
